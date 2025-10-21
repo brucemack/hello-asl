@@ -5,10 +5,10 @@ This is a demonstration of a minimal AllStarLink (ASL) server implemented
 without dependency on the Asterisk system. The purpose of this project
 is to study, understand, and document the mechanics of the ASL protocols.
 I would not expect anyone to use this program for "production" purposes.
-However, this should provide a good guide for building devices that 
+However, this should provide a good guide for building simple devices that 
 operate in the ASL ecosystem.
 
-At the moment the server accepts a call, authenticates it, and plays an 
+At the moment the demo server accepts a call, authenticates it, and plays an 
 audio announcement. There is no other functionality. Hopefully you 
 can see that all of the fundamental mechanisms are in place.
 
@@ -32,8 +32,8 @@ Steps to Run
 * Clone this GIT repo:
 
                 git clone https://github.com/brucemack/hello-asl.git
-                
-* cd hello-asl
+                cd hello-asl
+
 * Customize the top of asl-hub-server.py using your node ID and password.
 * Create a Python virtual environment called dev: 
 
@@ -56,7 +56,7 @@ Steps to Run
 * Select option "1"
 * Enter your PIN 
 * Select option "1"
-* You should hear the audio announcement
+* You should hear the audio announcement.
 
 Work In Process
 ===============
@@ -71,3 +71,10 @@ References
 
 * IAX2 RFC: https://datatracker.ietf.org/doc/html/rfc5456
 * https://github.com/brucemack/microlink/blob/main/docs/asl_supplement.md
+
+Contact
+=======
+
+Bruce MacKinnon KC1FSZ.  
+
+Email address is good in QRZ: https://www.qrz.com/db/KC1FSZ
