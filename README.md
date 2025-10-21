@@ -30,19 +30,27 @@ Steps to Run
 * Create an AllStarLink server.
 * Create a node and assign a password. Make sure that Telephone Portal Access is enabled.
 * Clone this GIT repo:
+
                 git clone https://github.com/brucemack/hello-asl.git
+                
 * cd hello-asl
 * Customize the top of asl-hub-server.py using your node ID and password.
 * Create a Python virtual environment called dev: 
 
                 python3 -m vdev dev
-                
+
 * Activate the virtual environment:
+
                 . dev/bin/activate
+
 * Install dependency packages:
+
                 pip install -r requirements.txt
+
 * Start the server:
+
                 python asl-hub-server.py
+
 * Dial the AllStarLink telephone portal +1 763-230-0000.
 * Enter your node ID
 * Select option "1"
