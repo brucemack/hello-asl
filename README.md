@@ -16,6 +16,8 @@ The program is a single Python file. The core essence of ASL is pretty simple.
 I'm no Python expert, but this seems like a good language to prototype network
 systems.
 
+I've run this on Linux (Raspbeyry Pi) and the Windows Linux Subsystem (WSL).
+
 At the moment you can only connect to the node via the AllStarLink Telephone
 Portal. This limitation will be removed shortly once I understand the 
 authentication mechanism a bit better.

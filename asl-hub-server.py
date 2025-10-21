@@ -38,7 +38,7 @@ import numpy as np
 import audioop
 
 # ===========================================================================
-# USER CONFIGURATION AREA - PLESE CUSTOMIZE HERE
+# USER CONFIGURATION AREA - PLEASE CUSTOMIZE HERE
 #
 # Put in your AllStarLink node ID here:
 node_id = "nnnnnn"
@@ -329,7 +329,7 @@ sock.setblocking(False)
 
 print(f"Listening on IAX2 port {UDP_IP}:{iax2_port}")
 
-# ---- Main processing loop --------------------------------------------------
+# ---- Main event loop -----------------------------------------------------
 
 while True:
 
