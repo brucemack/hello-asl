@@ -4,8 +4,8 @@ Overview
 This is a demonstration of a minimal AllStarLink (ASL) server implemented 
 without dependency on the Asterisk system. The purpose of this project
 is to study, understand, and document the mechanics of the ASL protocols.
-I would not expect anyone to use this program for "production" purposes.
-However, this should provide a good guide for building simple devices that 
+I would not expect anyone to use this code for "production" purposes.
+However, this should provide hams with a good guide for building simple devices that 
 operate in the ASL ecosystem.
 
 At the moment the demo server accepts a call, authenticates it, and plays an 
@@ -13,6 +13,8 @@ audio announcement. There is no other functionality. Hopefully you
 can see that all of the fundamental mechanisms are in place.
 
 The program is a single Python file. The core essence of ASL is pretty simple.
+I'm no Python expert, but this seems like a good language to prototype network
+systems.
 
 At the moment you can only connect to the node via the AllStarLink Telephone
 Portal. This limitation will be removed shortly once I understand the 
@@ -65,11 +67,13 @@ Work In Process
 * Other authentication mechanisms.
 * Ability to accept a connection from another node.
 * A microcontroller implementation.
+* SIP version.
 
 References
 ==========
 
 * IAX2 RFC: https://datatracker.ietf.org/doc/html/rfc5456
+* Asterisk IAX2 security docs: https://docs.asterisk.org/Configuration/Channel-Drivers/Inter-Asterisk-eXchange-protocol-version-2-IAX2/IAX2-Security/
 * https://github.com/brucemack/microlink/blob/main/docs/asl_supplement.md
 
 Contact
