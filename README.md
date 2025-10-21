@@ -1,10 +1,12 @@
 Overview
 ========
 
-This is a demonstration of a minimal AllStarLink (ASL) hub implemented 
+This is a demonstration of a minimal AllStarLink (ASL) server implemented 
 without dependency on the Asterisk system. The purpose of this project
 is to study, understand, and document the mechanics of the ASL protocols.
 I would not expect anyone to use this program for "production" purposes.
+However, this should provide a good guide for building devices that 
+operate in the ASL ecosystem.
 
 At the moment the server accepts a call, authenticates it, and plays an 
 audio announcement. There is no other functionality. Hopefully you 
@@ -27,17 +29,18 @@ Steps to Run
 * Find your PIN on the Account Settings page.
 * Create an AllStarLink server.
 * Create a node and assign a password. Make sure that Telephone Portal Access is enabled.
-* Clone this GIT repo.
+* Clone this GIT repo:
+                git clone https://github.com/brucemack/hello-asl.git
 * cd hello-asl
 * Customize the top of asl-hub-server.py using your node ID and password.
 * Create a Python virtual environment called dev: 
-        python3 -m vdev dev
+                python3 -m vdev dev
 * Activate the virtual environment:
-        . dev/bin/activate
+                . dev/bin/activate
 * Install dependency packages:
-        pip install -r requirements.txt
+                pip install -r requirements.txt
 * Start the server:
-        python asl-hub-server.py
+                python asl-hub-server.py
 * Dial the AllStarLink telephone portal +1 763-230-0000.
 * Enter your node ID
 * Select option "1"
@@ -48,6 +51,7 @@ Steps to Run
 Work In Process
 ===============
 
+* Remove dependency on obsolete audioop library.
 * Other authentication mechanisms.
 * Ability to accept a connection from another node.
 * A microcontroller implementation.
