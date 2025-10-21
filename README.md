@@ -33,6 +33,8 @@ Steps to Run
 * Find your PIN on the Account Settings page.
 * Create an AllStarLink server.
 * Create a node and assign a password. Make sure that Telephone Portal Access is enabled.
+* Make sure your firewall is configured to enable inbound IAX2 traffic on UDP port 4569. This
+is exactly the same connectivity that is needed for a normal ALlStarLink node so consult the AllStarLink documentation for more information.
 * Clone this GIT repo:
 
                 git clone https://github.com/brucemack/hello-asl.git
