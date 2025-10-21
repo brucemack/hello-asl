@@ -34,7 +34,9 @@ Steps to Run
 * cd hello-asl
 * Customize the top of asl-hub-server.py using your node ID and password.
 * Create a Python virtual environment called dev: 
+
                 python3 -m vdev dev
+                
 * Activate the virtual environment:
                 . dev/bin/activate
 * Install dependency packages:
