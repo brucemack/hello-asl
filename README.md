@@ -66,8 +66,9 @@ Work In Process
 * Remove dependency on obsolete audioop library.
 * Other authentication mechanisms.
 * Ability to accept a connection from another node.
-* A microcontroller implementation.
-* SIP version.
+* Multiple calls (i.e. hub conference)
+* A C++ microcontroller implementation.
+* SIP support.
 
 References
 ==========
