@@ -2,6 +2,12 @@
 A demonstration of accessing the HID registers of an USB audio device.
 Copyright (C) 2025, Bruce MacKinnon, KC1FSZ
 
+This is relevant because GPIOs are mapped into the HID register place
+on CM1xx style devices.
+
+There are no special APIs being used. We open the raw HID device
+and read/write it directly.
+
 Here we just read the HID registers forever. An event should be generated
 any time the status of the device changes (i.e. pressing buttons or
 toggling GPIOs).
