@@ -308,29 +308,32 @@ def current_ms_frac():
 
 public_key = serialization.load_pem_public_key(public_key_pem.encode("utf-8"))
 
-# Audio hardware setup
-# Note everything here runs at 48kHz
+# ALSA audio hardware setup
+# Note everything here runs at 48kHz. One block is 960 samples.
 audio_device_play = alsaaudio.PCM(channels=1, rate=48000, format=alsaaudio.PCM_FORMAT_S16_LE, 
     periodsize=160*6, device=audio_device_name)
 audio_device_capture = alsaaudio.PCM(alsaaudio.PCM_CAPTURE, alsaaudio.PCM_NONBLOCK,
     channels=1, rate=48000, format=alsaaudio.PCM_FORMAT_S16_LE, 
     periodsize=160*6, device=audio_device_name)
 
-# FIR filter used for up-sampling setup
+# FIR filter used for resampling
 # Please see https://mackinnon.info/2025/10/24/asl-usb-audio.html
 sample_rate = 48000
 nyq_rate = sample_rate / 2.0
-# The cutoff frequency of the filter.
+# The cutoff frequency of the filters, determined from looking at the
+# ASL coefficients and backing into the approximate value.
 lpf_cutoff_hz = 4300
 lpf_N = 31
 lpf_beta = 3.0
-# Use firwin with a Kaiser window to create a lowpass FIR filter.
+# Use a Kaiser window to create a lowpass FIR filter:
 lpf_taps = firwin(lpf_N, lpf_cutoff_hz / nyq_rate, window=('kaiser', lpf_beta))
 
 # The zi object is used to maintain the state inside of the
-# FIR since we are applying data one block at a time.
+# FIR since we are applying data one block at a time. State is important
+# to maintain continuity between blocks.
 us_lpf_zi = lfilter_zi(lpf_taps, [1])
 
+# Changes 8K audio to 48K audio
 def upsample(pcm_data_8k):
     global us_lpf_zi
     pcm_data_48k = []
@@ -347,6 +350,7 @@ def upsample(pcm_data_8k):
 # FIR since we are applying data one block at a time.
 ds_lpf_zi = lfilter_zi(lpf_taps, [1])
 
+# Changes 48K audio to 8K audio
 # TODO: Use a more efficient decimation filter
 def downsample(pcm_data_48k):
     global ds_lpf_zi
@@ -397,12 +401,12 @@ state_voice_sent_count = 0
 # Audio packets received
 audio_capture_queue = []
 
+# Structures used for communicating with the registration server
 reg_node_msg = {
     "node": node_id,
     "passwd": node_password,
     "remote": 0
 }
-
 reg_msg = {
     # TODO: Understand this port
     "port": 7777,
@@ -411,7 +415,6 @@ reg_msg = {
         }
     }
 }
-
 reg_msg["data"]["nodes"][node_id] = reg_node_msg
 
 # Create a UDP socket and bind 
