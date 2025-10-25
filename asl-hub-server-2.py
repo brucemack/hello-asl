@@ -41,9 +41,9 @@ import audioop
 # USER CONFIGURATION AREA - PLEASE CUSTOMIZE HERE
 #
 # Put in your AllStarLink node ID here:
-node_id = "61057"
+node_id = "nnnnn"
 # Put in your node password here:
-node_password = "microlink"
+node_password = "xxxxxxxx"
 # Put in the name of the audio .wav file (8kHz, 16-bit PCM) that will be used
 # as the announcement file on connection.
 audio_fn = "./W1TKZ-ID.wav"
@@ -175,6 +175,12 @@ def is_HANGUP_frame(frame):
         get_full_type(frame) == 6 and \
         get_full_subclass_c_bit(frame) == False and \
         get_full_subclass(frame) == 5
+
+def is_VOICE_frame(frame):
+    return is_full_frame(frame) and \
+        get_full_type(frame) == 2 and \
+        get_full_subclass_c_bit(frame) == False and \
+        get_full_subclass(frame) == 4
 
 def make_frame_header(source_call: int, dest_call: int, timestamp: int, 
     out_seq: int, in_seq: int, frame_type: int, frame_subclass: int):
@@ -583,6 +589,9 @@ while True:
             else:
                 print("AUTHREP error")
 
+    # In this state we are in an active call
+    elif state == State.IN_RINGING:
+        pass
 
     # In this state we are in an active call
     elif state == State.IN_CALL:
@@ -597,3 +606,15 @@ while True:
             # IMPORTANT: We don't move the outseq forward!
 
             state = State.IDLE
+
+        elif is_VOICE_frame(frame):
+            print("Got voice")
+            # Send ACK
+            resp = make_ACK_frame(state_call_id, 
+                state_source_call_id,
+                state_call_start_ms + (current_ms() - state_call_start_stamp),
+                state_outseq, 
+                state_expected_inseq)
+            print("Sending ACK", resp, state_outseq, state_expected_inseq)
+            sock.sendto(resp, addr)
+           # IMPORTANT: We don't move the outseq forward!
