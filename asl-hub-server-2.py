@@ -45,7 +45,7 @@ import struct
 # Put in your AllStarLink node ID here:
 node_id = "61057"
 # Put in your node password here:
-node_password = "xxxx"
+node_password = "xxxxxx"
 # Name of ALSA audio device used for output
 audio_device_name = "default"
 # ===========================================================================
@@ -180,6 +180,18 @@ def is_HANGUP_frame(frame):
         get_full_subclass_c_bit(frame) == False and \
         get_full_subclass(frame) == 5
 
+def is_LAGRQ_frame(frame):
+    return is_full_frame(frame) and \
+        get_full_type(frame) == 6 and \
+        get_full_subclass_c_bit(frame) == False and \
+        get_full_subclass(frame) == 11
+
+def is_PING_frame(frame):
+    return is_full_frame(frame) and \
+        get_full_type(frame) == 6 and \
+        get_full_subclass_c_bit(frame) == False and \
+        get_full_subclass(frame) == 2
+
 def is_VOICE_frame(frame):
     return is_full_frame(frame) and \
         get_full_type(frame) == 2 and \
@@ -240,21 +252,23 @@ def make_ACCEPT_frame(source_call: int, dest_call: int, timestamp: int,
 
 def make_RINGING_frame(source_call: int, dest_call: int, timestamp: int,
     out_seq: int, in_seq: int):
-    result = make_frame_header(source_call, dest_call, timestamp, out_seq, in_seq,
-        4, 3)
-    return result
+    return make_frame_header(source_call, dest_call, timestamp, out_seq, in_seq, 4, 3)
 
 def make_ANSWER_frame(source_call: int, dest_call: int, timestamp: int,
     out_seq: int, in_seq: int):
-    result = make_frame_header(source_call, dest_call, timestamp, out_seq, in_seq,
-        4, 4)
-    return result
+    return make_frame_header(source_call, dest_call, timestamp, out_seq, in_seq, 4, 4)
 
 def make_STOP_SOUNDS_frame(source_call: int, dest_call: int, timestamp: int,
     out_seq: int, in_seq: int):
-    result = make_frame_header(source_call, dest_call, timestamp, out_seq, in_seq,
-        4, 255)
-    return result
+    return make_frame_header(source_call, dest_call, timestamp, out_seq, in_seq, 4, 255)
+
+def make_LAGRP_frame(source_call: int, dest_call: int, timestamp: int,
+    out_seq: int, in_seq: int):
+    return make_frame_header(source_call, dest_call, timestamp, out_seq, in_seq, 6, 12)
+
+def make_PONG_frame(source_call: int, dest_call: int, timestamp: int,
+    out_seq: int, in_seq: int):
+    return make_frame_header(source_call, dest_call, timestamp, out_seq, in_seq, 6, 3)
 
 def make_VOICE_frame(source_call: int, dest_call: int, timestamp: int,
     out_seq: int, in_seq: int, audio_block: bytes):
@@ -420,9 +434,11 @@ while True:
         is_tick_cycle = True
         tick_counter += 1
 
-    # Pull in audio no matter what (non-blocking) to keep the queues clear
+    # Pull in local audio no matter what (non-blocking) to keep the hardware
+    # queues clear.
     audio_in_l, audio_in_data = audio_device_capture.read()
-    # If we are in a call this audio packet is queued for delivery to the network
+    # If we are in a call this audio packet is queued for later delivery to 
+    # the network.
     if state == State.IN_CALL:
         if audio_in_l > 0:
             audio_capture_queue.append(audio_in_data)
@@ -460,11 +476,11 @@ while True:
 
             state = State.IN_CALL
 
-    # If we are in an active call and there is audio to be delievered then 
-    # send it.
+    # If we are in an active call and there is audio waiting to be delievered out
+    # to the network then send it now.
     if state == State.IN_CALL:
 
-        # TODO: CONFIGURABLE DEPTH BEFORE WE ALLOW SERVICING
+        # TODO: CONFIGURABLE DEPTH BEFORE WE ALLOW SERVICING?
         if is_tick_cycle and len(audio_capture_queue) > 0:
             # Pull the oldest auto block
             audio_in_data = audio_capture_queue.pop(0)
@@ -493,6 +509,7 @@ while True:
                     state_outseq, 
                     state_expected_inseq,
                     audio_in_ulaw)
+                print("Sending VOICE", resp, state_outseq, state_expected_inseq)
                 sock.sendto(resp, addr)
                 state_outseq += 1
             # After the first we can use mini-frames.
@@ -513,12 +530,20 @@ while True:
     # Generic processing of full frames (regardless of state)
     if is_full_frame(frame):
 
-        print("---------", f"Received message from {addr}")        
-        print("Full frame", get_full_r_bit(frame), get_full_source_call(frame), get_full_dest_call(frame))
-        print("Type", get_full_type(frame), "Subclass", get_full_subclass(frame))
+        print("---------------------------------------")
+        if is_ACK_frame(frame):
+            print(f"ACK from {addr}")
+        elif is_NEW_frame(frame):
+            print(f"NEW from {addr}")
+        else:    
+            print(f"Full Frame from {addr}")        
+        print("R", get_full_r_bit(frame), "Source", get_full_source_call(frame), "Dest", get_full_dest_call(frame))
         print("Oseqno", get_full_outseq(frame), "Iseqno", get_full_inseq(frame))
+        print("Type", get_full_type(frame), "Subclass", get_full_subclass(frame))
 
-        # Deal with the inbound sequence number tracking.
+        # ---------------------------------------------------------------------
+        # Deal with the inbound sequence number tracking
+
         # When a NEW is received the inbound sequence counter is reset.
         if is_NEW_frame(frame):
             state_expected_inseq = 1
@@ -541,7 +566,42 @@ while True:
                 # Pay attention to wrap
                 state_expected_inseq = (get_full_outseq(frame) + 1) % 256
 
-    # State-spefific message processing
+    # ---------------------------------------------------------------------
+    # State-independent message processing
+
+    # When an ACK is processed there's nothing left to do with it
+    if is_ACK_frame(frame):
+        continue
+
+    # Deal with LAGRQ messages by sending a LAGRP
+    elif is_LAGRQ_frame(frame):
+        resp = make_LAGRP_frame(state_call_id, 
+            state_source_call_id,
+            get_full_timestamp(frame),
+            state_outseq, 
+            state_expected_inseq)                
+        print("Sending LAGRP", resp, state_outseq, state_expected_inseq)
+        state_outseq += 1
+        sock.sendto(resp, addr)
+        # Nothing left to do with this
+        continue
+
+    # Deal with PING messages by sending a PONG
+    elif is_PING_frame(frame):
+        resp = make_PONG_frame(state_call_id, 
+            state_source_call_id,
+            state_call_start_ms + (current_ms() - state_call_start_stamp),
+            state_outseq, 
+            state_expected_inseq)                
+        print("Sending PONG", resp, state_outseq, state_expected_inseq)
+        state_outseq += 1
+        sock.sendto(resp, addr)
+        # Nothing left to do with this
+        continue
+
+    # ---------------------------------------------------------------------
+    # State-dependent message processing
+  
     if state == State.IDLE:
         if is_NEW_frame(frame):
             # Get call start information
@@ -563,7 +623,7 @@ while True:
             sock.sendto(resp, addr)
             state = State.NEW1
         else:
-            print("Ignoring unknown message")
+            print("Ignoring unknown message (IDLE)")
 
     # In this state we are waiting for a NEW with the right CALLTOKEN
     elif state == State.NEW1:
@@ -677,6 +737,8 @@ while True:
 
             else:
                 print("AUTHREP error")
+        else:
+            print("Ignoring unknown message NEW2")
 
     elif state == State.RINGING:
 
@@ -695,6 +757,15 @@ while True:
             pcm_audio_48k = upsample(decode_ulaw(g711_audio))
             if audio_device_play.write(make_s16_le(pcm_audio_48k)) < 0:
                 print("Playback error")
+        
+        elif is_mini_voice_packet(frame):
+            g711_audio = frame[4:]
+            pcm_audio_48k = upsample(decode_ulaw(g711_audio))
+            if audio_device_play.write(make_s16_le(pcm_audio_48k)) < 0:
+                print("Playback error")
+        
+        else:
+            print("Ignoring unknown message RINGING")
 
     elif state == State.IN_CALL:
 
@@ -704,9 +775,11 @@ while True:
                 state_call_start_ms + (current_ms() - state_call_start_stamp),
                 state_outseq, 
                 state_expected_inseq)
+            print("Sending ACK", resp, state_outseq, state_expected_inseq)
             sock.sendto(resp, addr)
             # IMPORTANT: We don't move the outseq forward!
 
+            print("Hangup")
             state = State.IDLE
 
         elif is_VOICE_frame(frame):
@@ -730,3 +803,6 @@ while True:
             pcm_audio_48k = upsample(decode_ulaw(g711_audio))
             if audio_device_play.write(make_s16_le(pcm_audio_48k)) < 0:
                 print("Playback error")
+
+        else:
+            print("Ignoring unknown message IN_CALL")
