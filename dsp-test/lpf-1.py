@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.signal import firwin
+from scipy.signal import firwin, lfilter, lfilter_zi
 import matplotlib.pyplot as plt
 
 def fir_freq_response(coefficients, sampling_rate):
@@ -45,4 +45,38 @@ ax.plot(taps, label="fc=4.3kHz, Kaiser beta=3.0")
 ax.plot(taps2,label="chan_simpleusb.c")
 ax.grid(True)
 ax.legend()
+plt.show()
+
+# Sanity check: generate a sample signal of one second
+t = np.linspace(0, sample_rate, sample_rate, endpoint=False)
+# One tone is below a one tone is above the cutoff
+ft = 2000
+ft2 = 6000
+omega = 2 * np.pi * ft / sample_rate
+omega2 = 2 * np.pi * ft2 / sample_rate
+signal = np.cos(omega * t) + np.cos(omega2 * t)
+
+# Apply the FIR filter in blocks to simulate a network streaming
+filtered_signal = []
+# The size of IAX2 network blocks
+block_size = 160
+blocks = int(len(signal) / block_size)
+
+# The zi object is used to maintain the state inside of the
+# FIR since we are applying data one block at a time.
+zi = lfilter_zi(taps, [1])
+
+for block in range(0, blocks):
+    # NOTE: zi is being passed around each time
+    filtered_block, zi = lfilter(taps, [1.0], 
+        signal[block * block_size:(block + 1) * block_size], zi=zi)
+    filtered_signal.extend(filtered_block / 32767.0)
+
+# Plot resulting signal
+fig, ax = plt.subplots()
+ax.plot(t[0:1024], filtered_signal[0:1024])
+ax.set_title('Filtered Signal (ft=' + str(ft) + ')')
+ax.set_xlabel('Time')
+ax.set_ylabel('Magnitude')
+ax.grid(True)
 plt.show()
