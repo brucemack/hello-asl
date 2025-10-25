@@ -2,3 +2,4 @@ numpy
 scipy
 cryptography
 requests
+matplotlib
