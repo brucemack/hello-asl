@@ -303,6 +303,7 @@ audio_device_capture = alsaaudio.PCM(alsaaudio.PCM_CAPTURE, alsaaudio.PCM_NONBLO
     periodsize=160*6, device=audio_device_name)
 
 # FIR filter used for up-sampling setup
+# Please see https://mackinnon.info/2025/10/24/asl-usb-audio.html
 sample_rate = 48000
 nyq_rate = sample_rate / 2.0
 # The cutoff frequency of the filter.
