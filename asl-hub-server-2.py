@@ -32,7 +32,6 @@ import base64
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import serialization
-import scipy.io.wavfile as wavfile
 from scipy.signal import firwin, lfilter, lfilter_zi
 import numpy as np
 # TODO: THIS IS DEPRECATED AS OF PYTHON 3.13, NEED TO REPLACE
@@ -46,12 +45,9 @@ import struct
 # Put in your AllStarLink node ID here:
 node_id = "61057"
 # Put in your node password here:
-node_password = "xxxxxx"
-# Put in the name of the audio .wav file (8kHz, 16-bit PCM) that will be used
-# as the announcement file on connection.
-audio_fn = "./W1TKZ-ID.wav"
-# Name of audio device used for output
-playback_audio_device = "default"
+node_password = "xxxx"
+# Name of ALSA audio device used for output
+audio_device_name = "default"
 # ===========================================================================
 
 # ===========================================================================
@@ -298,13 +294,13 @@ def current_ms_frac():
 
 public_key = serialization.load_pem_public_key(public_key_pem.encode("utf-8"))
 
-audio_samplerate, audio_data = wavfile.read(audio_fn)
-if audio_samplerate != 8000:
-    raise Exception("Audio format error")
-
-# Audio output setup
-play_device = alsaaudio.PCM(channels=1, rate=48000, format=alsaaudio.PCM_FORMAT_S16_LE, 
-                            periodsize=160*6, device=playback_audio_device)
+# Audio hardware setup
+# Note everything here runs at 48kHz
+audio_device_play = alsaaudio.PCM(channels=1, rate=48000, format=alsaaudio.PCM_FORMAT_S16_LE, 
+    periodsize=160*6, device=audio_device_name)
+audio_device_capture = alsaaudio.PCM(alsaaudio.PCM_CAPTURE, alsaaudio.PCM_NONBLOCK,
+    channels=1, rate=48000, format=alsaaudio.PCM_FORMAT_S16_LE, 
+    periodsize=160*6, device=audio_device_name)
 
 # FIR filter used for up-sampling setup
 sample_rate = 48000
@@ -315,13 +311,13 @@ lpf_N = 31
 lpf_beta = 3.0
 # Use firwin with a Kaiser window to create a lowpass FIR filter.
 lpf_taps = firwin(lpf_N, lpf_cutoff_hz / nyq_rate, window=('kaiser', lpf_beta))
-print("LPF Taps", lpf_taps)
+
 # The zi object is used to maintain the state inside of the
 # FIR since we are applying data one block at a time.
-lpf_zi = lfilter_zi(lpf_taps, [1])
+us_lpf_zi = lfilter_zi(lpf_taps, [1])
 
 def upsample(pcm_data_8k):
-    global lpf_zi
+    global us_lpf_zi
     pcm_data_48k = []
     # First do the 1:6 expansion
     for s in pcm_data_8k:
@@ -329,9 +325,28 @@ def upsample(pcm_data_8k):
             pcm_data_48k.append(s)
     # Apply the LPF to the expanded data to prevent aliasing
     # NOTE: zi is being passed around each time to maintain state
-    pcm_data_48k, lpf_zi = lfilter(lpf_taps, [1.0], pcm_data_48k, zi=lpf_zi)
+    pcm_data_48k, us_lpf_zi = lfilter(lpf_taps, [1.0], pcm_data_48k, zi=us_lpf_zi)
     return pcm_data_48k
 
+# The zi object is used to maintain the state inside of the
+# FIR since we are applying data one block at a time.
+ds_lpf_zi = lfilter_zi(lpf_taps, [1])
+
+# TODO: Use a more efficient decimation filter
+def downsample(pcm_data_48k):
+    global ds_lpf_zi
+    # Apply the LPF to the expanded data to prevent aliasing
+    # NOTE: zi is being passed around each time to maintain state
+    pcm_data_48k, ds_lpf_zi = lfilter(lpf_taps, [1.0], pcm_data_48k, zi=ds_lpf_zi)
+    pcm_data_8k = []
+    # Do the 6:1 decimation
+    i = 0
+    for j in range(0, 160):
+        pcm_data_8k.append(pcm_data_48k[i])
+        i += 6
+    return pcm_data_8k
+
+# TODO: Look at struct.pack()
 def make_s16_le(data):
     result = bytearray()
     for d in data:
@@ -359,9 +374,7 @@ state_call_start_stamp = 0
 state_challenge = ""
 state_expected_inseq = 0
 state_outseq = 0
-state_audio_frame = 0
-state_audio_ptr = 0
-state_audio_start_stamp = 0
+state_voice_sent_count = 0
 last_reg_ms = 0
 
 reg_node_msg = {
@@ -401,6 +414,10 @@ while True:
         print("Registration response:", reg_response.text)
         last_reg_ms = current_ms()
 
+    # Pull in audio no matter what (non-blocking). We may use this later
+    # if we are in the right state.
+    audio_in_l, audio_in_data = audio_device_capture.read()
+
     if state == State.RINGING:
 
         # Look for timeout on the ringer
@@ -433,45 +450,46 @@ while True:
     # In this state we are in an active call
     elif state == State.IN_CALL:
 
+        # TODO: NEED TO CREATE A TX QUEUE TO ADDRESS SOME JITTER
+        # ISSUES HERE.
         # Make progress on streaming out audio
-        now_ms_frac = current_ms_frac()
-        # Only do this every 20ms
-        target_ms_frac = (state_audio_start_stamp + (state_audio_frame * 20.0))
+        if audio_in_l > 0:
+            # Convert the data into PCM numbers. This hardware
+            # is running at 48K so there are 160 * 6 samples.
+            # The audio device uses little-endian.
+            audio_in_pcm_48k = struct.unpack(f'<{960}h', audio_in_data)
+            # Downsample
+            audio_in_pcm_8k = downsample(audio_in_pcm_48k)
+            assert(len(audio_in_pcm_8k) == 160)
+            # Convert from numbers into S16_LE format
+            audio_in_s16le_8k = make_s16_le(audio_in_pcm_8k)
+            assert(len(audio_in_s16le_8k) == 160 * 2)
+            # Convert to G711 format
+            audio_in_ulaw = encode_ulaw(audio_in_s16le_8k)
+            assert(len(audio_in_ulaw) == 160)
 
-        if state_audio_ptr < audio_data.size:
-            if now_ms_frac > target_ms_frac:    
-                # Shorten the last block if necessary
-                audio_block_size = 160
-                audio_left = audio_data.size - state_audio_ptr
-                if audio_left < audio_block_size:
-                    audio_block_size = audio_left
-                audio_block = audio_data[state_audio_ptr:state_audio_ptr + audio_block_size]
-                audio_block_ulaw = encode_ulaw(audio_block)
-
+            # TODO: THIS LOGIC NEEDS TO BE IMPROVED. THE FULL VOICE
+            # FRAME SHOULD BE SENT WHENEVER THE 16-BIT TIMESTAMP ROLLS.
+            if state_voice_sent_count == 0:
                 # For the first audio frame, make a full voice frame. 
-                if state_audio_frame == 0:
-                    resp = make_VOICE_frame(state_call_id, 
-                        state_source_call_id,
-                        state_call_start_ms + (current_ms() - state_call_start_stamp),
-                        state_outseq, 
-                        state_expected_inseq,
-                        audio_block_ulaw)
-                    sock.sendto(resp, addr)
-                    state_outseq += 1
-                # After the first we can use mini-frames.
-                # TODO: There is some special handling that should be followed
-                # when the 16-bit timestamp wraps around zero.
-                else:
-                    resp = make_VOICE_miniframe(state_call_id, 
-                        state_call_start_ms + (current_ms() - state_call_start_stamp),
-                        audio_block_ulaw)
-                    sock.sendto(resp, addr)
+                resp = make_VOICE_frame(state_call_id, 
+                    state_source_call_id,
+                    state_call_start_ms + (current_ms() - state_call_start_stamp),
+                    state_outseq, 
+                    state_expected_inseq,
+                    audio_in_ulaw)
+                sock.sendto(resp, addr)
+                state_outseq += 1
+            # After the first we can use mini-frames.
+            else:
+                resp = make_VOICE_miniframe(state_call_id, 
+                    state_call_start_ms + (current_ms() - state_call_start_stamp),
+                    audio_in_ulaw)
+                sock.sendto(resp, addr)
 
-                state_audio_ptr += audio_block_size
-                state_audio_frame += 1
+            state_voice_sent_count += 1
 
-
-    # Look for new messages from the peer
+    # Look for new messages from the peer (non-blocking)
     try:
         frame, addr = sock.recvfrom(1024)
     except BlockingIOError:
@@ -515,6 +533,7 @@ while True:
             state_source_call_id = get_full_source_call(frame)
             state_call_start_stamp = current_ms()
             state_call_start_ms = get_full_timestamp(frame)
+            state_voice_sent_count = 0
             # Send a CALLTOKEN challenge
             state_token = make_call_token()
             # NOTE: For now the call ID is set to 1
@@ -658,9 +677,8 @@ while True:
             # IMPORTANT: We don't move the outseq forward!
 
             g711_audio = frame[12:]
-            print("Voice frame", len(g711_audio))
             pcm_audio_48k = upsample(decode_ulaw(g711_audio))
-            if play_device.write(make_s16_le(pcm_audio_48k)) < 0:
+            if audio_device_play.write(make_s16_le(pcm_audio_48k)) < 0:
                 print("Playback error")
 
     elif state == State.IN_CALL:
@@ -688,14 +706,12 @@ while True:
             # IMPORTANT: We don't move the outseq forward!
 
             g711_audio = frame[12:]
-            print("Voice frame", len(g711_audio))
             pcm_audio_48k = upsample(decode_ulaw(g711_audio))
-            if play_device.write(make_s16_le(pcm_audio_48k)) < 0:
+            if audio_device_play.write(make_s16_le(pcm_audio_48k)) < 0:
                 print("Playback error")
 
         elif is_mini_voice_packet(frame):
             g711_audio = frame[4:]
-            print("Mini voice packet", len(g711_audio))
             pcm_audio_48k = upsample(decode_ulaw(g711_audio))
-            if play_device.write(make_s16_le(pcm_audio_48k)) < 0:
+            if audio_device_play.write(make_s16_le(pcm_audio_48k)) < 0:
                 print("Playback error")
