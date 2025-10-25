@@ -33,20 +33,25 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import serialization
 import scipy.io.wavfile as wavfile
+from scipy.signal import firwin, lfilter, lfilter_zi
 import numpy as np
 # TODO: THIS IS DEPRECATED AS OF PYTHON 3.13, NEED TO REPLACE
 import audioop
+import alsaaudio
+import struct 
 
 # ===========================================================================
 # USER CONFIGURATION AREA - PLEASE CUSTOMIZE HERE
 #
 # Put in your AllStarLink node ID here:
-node_id = "nnnnn"
+node_id = "61057"
 # Put in your node password here:
-node_password = "xxxxxxxx"
+node_password = "xxxxxx"
 # Put in the name of the audio .wav file (8kHz, 16-bit PCM) that will be used
 # as the announcement file on connection.
 audio_fn = "./W1TKZ-ID.wav"
+# Name of audio device used for output
+playback_audio_device = "default"
 # ===========================================================================
 
 # ===========================================================================
@@ -74,6 +79,9 @@ reg_interval_ms = 5 * 60 * 1000
 
 def is_full_frame(frame):
     return frame[0] & 0b10000000 == 0b10000000
+
+def is_mini_voice_packet(frame):
+    return frame[0] & 0b10000000 == 0b00000000
 
 def get_full_source_call(frame):
     return ((frame[0] & 0b01111111) << 8) | frame[1]
@@ -272,9 +280,15 @@ def make_VOICE_miniframe(source_call: int, timestamp: int, audio_data: bytes):
     result += audio_data
     return result
 
-def encode_ulaw(pcm_data: bytes):
+def encode_ulaw(pcm_data):
     # TODO: REMOVE DEPENDENCY ON THIS DEPRECATED LIBRARY
     return audioop.lin2ulaw(pcm_data, 2)
+
+def decode_ulaw(g711_data: bytes):
+    # TODO: REMOVE DEPENDENCY ON THIS DEPRECATED LIBRARY
+    # Testing has shown that this created little-endian integers
+    b = audioop.ulaw2lin(g711_data, 2)
+    return struct.unpack(f'<{160}h', b)
 
 def current_ms():
     return int(time.time() * 1000)
@@ -287,6 +301,46 @@ public_key = serialization.load_pem_public_key(public_key_pem.encode("utf-8"))
 audio_samplerate, audio_data = wavfile.read(audio_fn)
 if audio_samplerate != 8000:
     raise Exception("Audio format error")
+
+# Audio output setup
+play_device = alsaaudio.PCM(channels=1, rate=48000, format=alsaaudio.PCM_FORMAT_S16_LE, 
+                            periodsize=160*6, device=playback_audio_device)
+
+# FIR filter used for up-sampling setup
+sample_rate = 48000
+nyq_rate = sample_rate / 2.0
+# The cutoff frequency of the filter.
+lpf_cutoff_hz = 4300
+lpf_N = 31
+lpf_beta = 3.0
+# Use firwin with a Kaiser window to create a lowpass FIR filter.
+lpf_taps = firwin(lpf_N, lpf_cutoff_hz / nyq_rate, window=('kaiser', lpf_beta))
+print("LPF Taps", lpf_taps)
+# The zi object is used to maintain the state inside of the
+# FIR since we are applying data one block at a time.
+lpf_zi = lfilter_zi(lpf_taps, [1])
+
+def upsample(pcm_data_8k):
+    global lpf_zi
+    pcm_data_48k = []
+    # First do the 1:6 expansion
+    for s in pcm_data_8k:
+        for i in range(0,6):
+            pcm_data_48k.append(s)
+    # Apply the LPF to the expanded data to prevent aliasing
+    # NOTE: zi is being passed around each time to maintain state
+    pcm_data_48k, lpf_zi = lfilter(lpf_taps, [1.0], pcm_data_48k, zi=lpf_zi)
+    return pcm_data_48k
+
+def make_s16_le(data):
+    result = bytearray()
+    for d in data:
+        i = int(d) 
+        low = i & 0xff
+        high = (i >> 8) & 0xff
+        result.append(low)
+        result.append(high)
+    return result
 
 call_id_counter = 1
 
@@ -423,7 +477,7 @@ while True:
     except BlockingIOError:
         continue
 
-    # Process the full frames
+    # Generic processing of full frames (regardless of state)
     if is_full_frame(frame):
 
         print("---------", f"Received message from {addr}")        
@@ -454,6 +508,7 @@ while True:
                 # Pay attention to wrap
                 state_expected_inseq = (get_full_outseq(frame) + 1) % 256
 
+    # State-spefific message processing
     if state == State.IDLE:
         if is_NEW_frame(frame):
             # Get call start information
@@ -589,11 +644,25 @@ while True:
             else:
                 print("AUTHREP error")
 
-    # In this state we are in an active call
-    elif state == State.IN_RINGING:
-        pass
+    elif state == State.RINGING:
 
-    # In this state we are in an active call
+        if is_VOICE_frame(frame):
+            # Send ACK
+            resp = make_ACK_frame(state_call_id, 
+                state_source_call_id,
+                state_call_start_ms + (current_ms() - state_call_start_stamp),
+                state_outseq, 
+                state_expected_inseq)
+            print("Sending ACK", resp, state_outseq, state_expected_inseq)
+            sock.sendto(resp, addr)
+            # IMPORTANT: We don't move the outseq forward!
+
+            g711_audio = frame[12:]
+            print("Voice frame", len(g711_audio))
+            pcm_audio_48k = upsample(decode_ulaw(g711_audio))
+            if play_device.write(make_s16_le(pcm_audio_48k)) < 0:
+                print("Playback error")
+
     elif state == State.IN_CALL:
 
         if is_HANGUP_frame(frame):
@@ -608,7 +677,6 @@ while True:
             state = State.IDLE
 
         elif is_VOICE_frame(frame):
-            print("Got voice")
             # Send ACK
             resp = make_ACK_frame(state_call_id, 
                 state_source_call_id,
@@ -617,4 +685,17 @@ while True:
                 state_expected_inseq)
             print("Sending ACK", resp, state_outseq, state_expected_inseq)
             sock.sendto(resp, addr)
-           # IMPORTANT: We don't move the outseq forward!
+            # IMPORTANT: We don't move the outseq forward!
+
+            g711_audio = frame[12:]
+            print("Voice frame", len(g711_audio))
+            pcm_audio_48k = upsample(decode_ulaw(g711_audio))
+            if play_device.write(make_s16_le(pcm_audio_48k)) < 0:
+                print("Playback error")
+
+        elif is_mini_voice_packet(frame):
+            g711_audio = frame[4:]
+            print("Mini voice packet", len(g711_audio))
+            pcm_audio_48k = upsample(decode_ulaw(g711_audio))
+            if play_device.write(make_s16_le(pcm_audio_48k)) < 0:
+                print("Playback error")

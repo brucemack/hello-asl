@@ -43,7 +43,7 @@ import audioop
 # Put in your AllStarLink node ID here:
 node_id = "61057"
 # Put in your node password here:
-node_password = "microlink"
+node_password = "xxxxxx"
 # Put in the name of the audio .wav file (8kHz, 16-bit PCM) that will be used
 # as the announcement file on connection.
 audio_fn = "./W1TKZ-ID.wav"
