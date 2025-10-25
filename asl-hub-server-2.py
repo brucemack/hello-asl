@@ -359,6 +359,9 @@ def make_s16_le(data):
     return result
 
 call_id_counter = 1
+last_reg_ms = 0
+first_tick_ms = current_ms()
+tick_counter = 0
 
 class State(Enum):
     IDLE = 1
@@ -376,7 +379,9 @@ state_challenge = ""
 state_expected_inseq = 0
 state_outseq = 0
 state_voice_sent_count = 0
-last_reg_ms = 0
+
+# Audio packets received
+audio_capture_queue = []
 
 reg_node_msg = {
     "node": node_id,
@@ -407,17 +412,28 @@ print(f"Listening on IAX2 port {UDP_IP}:{iax2_port}")
 
 while True:
 
-    # Process any background activity
+    # A tick cycle happens every 20ms. There are some special activities
+    # that can happen in a tick cycle.
+    is_tick_cycle = False
+    now = current_ms_frac()
+    if now >= first_tick_ms + tick_counter * 20:
+        is_tick_cycle = True
+        tick_counter += 1
+
+    # Pull in audio no matter what (non-blocking) to keep the queues clear
+    audio_in_l, audio_in_data = audio_device_capture.read()
+    # If we are in a call this audio packet is queued for delivery to the network
+    if state == State.IN_CALL:
+        if audio_in_l > 0:
+            audio_capture_queue.append(audio_in_data)
+
+    # Process any timer-based activity
 
     # Periodically register the node so that other peers known where to find us
     if (current_ms() - last_reg_ms) > reg_interval_ms:
         reg_response = requests.post(reg_url, json=reg_msg)
         print("Registration response:", reg_response.text)
         last_reg_ms = current_ms()
-
-    # Pull in audio no matter what (non-blocking). We may use this later
-    # if we are in the right state.
-    audio_in_l, audio_in_data = audio_device_capture.read()
 
     if state == State.RINGING:
 
@@ -443,23 +459,21 @@ while True:
             state_outseq += 1
 
             state = State.IN_CALL
-            state_audio_ptr = 0
-            state_audio_frame = 0
-            # Set the start time forward a bit
-            state_audio_start_stamp = current_ms_frac() + 250
 
-    # In this state we are in an active call
-    elif state == State.IN_CALL:
+    # If we are in an active call and there is audio to be delievered then 
+    # send it.
+    if state == State.IN_CALL:
 
-        # TODO: NEED TO CREATE A TX QUEUE TO ADDRESS SOME JITTER
-        # ISSUES HERE.
-        # Make progress on streaming out audio
-        if audio_in_l > 0:
-            # Convert the data into PCM numbers. This hardware
+        # TODO: CONFIGURABLE DEPTH BEFORE WE ALLOW SERVICING
+        if is_tick_cycle and len(audio_capture_queue) > 0:
+            # Pull the oldest auto block
+            audio_in_data = audio_capture_queue.pop(0)
+            assert(len(audio_in_data) == 160 * 6 * 2)
+            # Convert the data into PCM numbers. The hardware
             # is running at 48K so there are 160 * 6 samples.
             # The audio device uses little-endian.
             audio_in_pcm_48k = struct.unpack(f'<{960}h', audio_in_data)
-            # Downsample
+            # Downsample 48k->8k
             audio_in_pcm_8k = downsample(audio_in_pcm_48k)
             assert(len(audio_in_pcm_8k) == 160)
             # Convert from numbers into S16_LE format
@@ -490,7 +504,7 @@ while True:
 
             state_voice_sent_count += 1
 
-    # Look for new messages from the peer (non-blocking)
+    # Look for new network messages from the peer (non-blocking)
     try:
         frame, addr = sock.recvfrom(1024)
     except BlockingIOError:
