@@ -16,6 +16,9 @@ toggling GPIOs).
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <errno.h>
+#include <linux/hidraw.h>
+#include <sys/ioctl.h>
 
 //gcc -Wall hid2.c -o hid2
 
@@ -31,25 +34,33 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    // Request an input report
+    char buf[64];
+    buf[0] = 0;
+    int ret = ioctl(fd, HIDIOCGINPUT(5), buf);
+    printf("ret %d %d\n", ret, errno);
+    for (unsigned i = 1; i < ret; i++)
+        printf("%d %02X\n", i, (unsigned int)buf[i]);
+
+    /*
     // Issue a "Set Output Report" HID request to select a specific register.
-    char buf[4];
     buf[0] = 48;
     buf[1] = 0;
     buf[2] = 0;
     buf[3] = 3;
     ssize_t bytes_write = write(fd, buf, sizeof(buf));
-    printf("Bytes Written %ld\n", bytes_write);
+    printf("Bytes Written %ld %d\n", bytes_write, errno);
+    */
 
-    // Wait for some response
+    // Wait for some interrupts
     while (1) {
-        unsigned char buffer[64];
-        ssize_t bytes_read = read(fd, buffer, sizeof(buffer));
+        ssize_t bytes_read = read(fd, buf, sizeof(buf));
         if (bytes_read < 0) {
             printf("Failed to read from /dev/hidraw0\n");
         } else {
             printf("Good read\n");
             for (unsigned i = 0; i < bytes_read; i++) {
-                printf("%d %02X\n", i, (unsigned int)buffer[i]);
+                printf("%d %02X\n", i, (unsigned int)buf[i]);
             }
         }
     }
