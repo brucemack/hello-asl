@@ -20,7 +20,7 @@
 # Overview
 # --------
 # This program provides a simple implementation of an AllStarLink 
-# hub. The goal is to demonstrate AllStarLink functionaltion without
+# hub. The goal is to demonstrate AllStarLink functionality without
 # dependency on the Asterisk infrastructure.
 #
 import time
